@@ -1,0 +1,20 @@
+[telegram]
+enabled = true
+bot_token = "YOUR_TELEGRAM_BOT_TOKEN"
+stream_edit_interval_ms = 800
+message_max_chars = 3500
+
+[acp]
+stream_chunk_delay_ms = 25
+io_channel_buffer_size = 65536
+max_running_tasks = 8
+
+[codex]
+# binary_path = "./tools/codex"
+startup_timeout_ms = 5000
+
+[whitelist]
+allowed_user_ids = []
+allowed_chat_ids = []
+allowed_folders = ["."]
+allowed_folders_file = "./config/allowed_folders.txt"

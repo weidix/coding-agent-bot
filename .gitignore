@@ -2,3 +2,4 @@
 .codex
 .DS_Store
 AGENTS.md
+config/bot.toml
