@@ -5,16 +5,19 @@ use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use teloxide::prelude::*;
-use teloxide::types::{InlineKeyboardButton, InlineKeyboardMarkup, Me, MessageId, User};
+use teloxide::types::{InlineKeyboardButton, InlineKeyboardMarkup, Me, MessageId};
 use tokio::sync::Mutex;
 
 use crate::acp::AcpBackend;
 use crate::config::TelegramConfig;
 use crate::task_manager::{TaskManager, resolve_cwd};
 use crate::task_types::{TaskEvent, TaskEventKind, TaskId, TaskSnapshot};
-use crate::whitelist::AccessControl;
+use access::{
+    extract_callback_context, user_id_from_message, username_from_message, username_from_user,
+};
 use render::{format_task_summary, render_stream_text};
 
+mod access;
 mod render;
 
 const CALLBACK_NEW_TASK: &str = "new_task";
@@ -24,11 +27,11 @@ const CALLBACK_STATUS_PREFIX: &str = "status:";
 const NEW_TASK_USAGE: &str = "/new <cwd> backend=codex [model=xxx]";
 const NEW_TASK_HINT: &str = "请使用 /new <cwd> backend=codex [model=xxx] 创建任务。";
 const START_HELP_TEXT: &str = "可用操作：\n1) 使用 /new <cwd> backend=codex [model=xxx] 新建任务\n2) 发送内容给最近任务\n3) /prompt <task_id> <内容>\n4) /list 查看任务";
+const MESSAGE_ACCESS_DENIED: &str = "你没有权限给此机器人发送消息。";
 
 #[derive(Clone)]
 pub struct TelegramRuntime {
     manager: TaskManager,
-    access_control: AccessControl,
     config: TelegramConfig,
 }
 
@@ -68,16 +71,8 @@ pub async fn run_telegram(runtime: TelegramRuntime, bot: Bot) {
 }
 
 impl TelegramRuntime {
-    pub fn new(
-        manager: TaskManager,
-        access_control: AccessControl,
-        config: TelegramConfig,
-    ) -> Self {
-        Self {
-            manager,
-            access_control,
-            config,
-        }
+    pub fn new(manager: TaskManager, config: TelegramConfig) -> Self {
+        Self { manager, config }
     }
 }
 
@@ -92,7 +87,6 @@ async fn handle_message(
         return Ok(());
     };
 
-    let chat_id = msg.chat.id.0;
     let user_id = match user_id_from_message(msg.from.as_ref()) {
         Some(id) => id,
         None => {
@@ -101,15 +95,13 @@ async fn handle_message(
             return Ok(());
         }
     };
+    let username = username_from_message(msg.from.as_ref());
 
-    if !runtime
-        .access_control
-        .is_user_allowed(Some(user_id), chat_id)
-    {
-        bot.send_message(msg.chat.id, "不在白名单中，已拒绝此操作。")
-            .await?;
+    if !is_sender_allowed(username, &runtime.config.allowed_users) {
+        bot.send_message(msg.chat.id, MESSAGE_ACCESS_DENIED).await?;
         return Ok(());
     }
+    let chat_id = msg.chat.id.0;
 
     if text.starts_with("/start") {
         bot.send_message(msg.chat.id, START_HELP_TEXT)
@@ -208,12 +200,9 @@ async fn handle_callback(
         }
     };
 
-    if !runtime
-        .access_control
-        .is_user_allowed(Some(user_id), chat_id)
-    {
+    if !is_sender_allowed(username_from_user(&q.from), &runtime.config.allowed_users) {
         bot.answer_callback_query(q.id.clone())
-            .text("不在白名单中")
+            .text(MESSAGE_ACCESS_DENIED)
             .await?;
         return Ok(());
     }
@@ -447,18 +436,28 @@ fn parse_task_action(data: &str, prefix: &str) -> Option<TaskId> {
     data.strip_prefix(prefix)?.parse::<TaskId>().ok()
 }
 
-fn extract_callback_context(query: &CallbackQuery) -> Option<(i64, i64)> {
-    let chat_id = query.regular_message()?.chat.id.0;
-    let user_id = user_id_from_user(&query.from)?;
-    Some((chat_id, user_id))
+fn is_sender_allowed(username: Option<&str>, allowed_users: &[String]) -> bool {
+    if allowed_users.is_empty() {
+        return false;
+    }
+
+    let Some(sender) = normalize_username(username) else {
+        return false;
+    };
+
+    allowed_users
+        .iter()
+        .filter_map(|name| normalize_username(Some(name.as_str())))
+        .any(|allowed| allowed == sender)
 }
 
-fn user_id_from_message(user: Option<&User>) -> Option<i64> {
-    user.and_then(user_id_from_user)
-}
+fn normalize_username(raw: Option<&str>) -> Option<String> {
+    let value = raw?.trim().trim_start_matches('@');
+    if value.is_empty() {
+        return None;
+    }
 
-fn user_id_from_user(user: &User) -> Option<i64> {
-    i64::try_from(user.id.0).ok()
+    Some(value.to_ascii_lowercase())
 }
 
 fn main_keyboard() -> InlineKeyboardMarkup {

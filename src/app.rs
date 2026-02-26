@@ -5,7 +5,6 @@ use crate::acp::{AcpBackend, AcpRuntimeConfig};
 use crate::config::AppConfig;
 use crate::task_manager::TaskManager;
 use crate::telegram::{TelegramRuntime, run_telegram};
-use crate::whitelist::AccessControl;
 
 pub async fn run_from_default_config() -> Result<()> {
     let config = AppConfig::load_default()?;
@@ -20,9 +19,6 @@ pub async fn run(config: AppConfig) -> Result<()> {
         .without_time()
         .init();
 
-    let current_dir = std::env::current_dir()?;
-    let access_control = AccessControl::from_config(&config.whitelist, &current_dir)?;
-
     let runtime_cfg = AcpRuntimeConfig {
         backend: AcpBackend::default(),
         codex_binary_path: config.codex.binary_path.clone(),
@@ -32,18 +28,10 @@ pub async fn run(config: AppConfig) -> Result<()> {
         io_channel_buffer_size: config.acp.io_channel_buffer_size,
     };
 
-    let manager = TaskManager::new(
-        runtime_cfg,
-        access_control.clone(),
-        config.acp.max_running_tasks,
-    );
+    let manager = TaskManager::new(runtime_cfg, config.acp.max_running_tasks);
 
     if config.telegram.enabled {
-        let telegram_runtime = TelegramRuntime::new(
-            manager.clone(),
-            access_control.clone(),
-            config.telegram.clone(),
-        );
+        let telegram_runtime = TelegramRuntime::new(manager.clone(), config.telegram.clone());
         let bot = Bot::new(config.telegram.bot_token.clone());
         tokio::spawn(async move {
             run_telegram(telegram_runtime, bot).await;

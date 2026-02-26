@@ -8,7 +8,6 @@ use tokio::sync::{Mutex, broadcast, mpsc};
 
 use crate::acp::{AcpBackend, AcpRuntimeConfig, AcpWorkerCommand, EventEmitter, spawn_acp_worker};
 use crate::task_types::{TaskEvent, TaskId, TaskSnapshot, TaskState};
-use crate::whitelist::AccessControl;
 
 #[derive(Clone)]
 pub struct TaskManager {
@@ -17,7 +16,6 @@ pub struct TaskManager {
 
 struct TaskManagerInner {
     runtime_cfg: AcpRuntimeConfig,
-    access_control: AccessControl,
     max_running_tasks: usize,
     next_task_id: AtomicU64,
     sequence: Arc<AtomicU64>,
@@ -31,15 +29,10 @@ struct ManagedTask {
 }
 
 impl TaskManager {
-    pub fn new(
-        runtime_cfg: AcpRuntimeConfig,
-        access_control: AccessControl,
-        max_running_tasks: usize,
-    ) -> Self {
+    pub fn new(runtime_cfg: AcpRuntimeConfig, max_running_tasks: usize) -> Self {
         let (event_tx, _) = broadcast::channel(512);
         let inner = Arc::new(TaskManagerInner {
             runtime_cfg,
-            access_control,
             max_running_tasks,
             next_task_id: AtomicU64::new(1),
             sequence: Arc::new(AtomicU64::new(1)),
@@ -72,23 +65,12 @@ impl TaskManager {
             ));
         }
 
-        let base_dir = std::env::current_dir()?;
         let chosen_cwd = cwd.ok_or_else(|| anyhow!("cwd must be provided when creating a task"))?;
         let chosen_cwd = if chosen_cwd.is_absolute() {
             chosen_cwd
         } else {
-            base_dir.join(chosen_cwd)
+            std::env::current_dir()?.join(chosen_cwd)
         };
-        if !self
-            .inner
-            .access_control
-            .is_path_allowed(&chosen_cwd, &base_dir)
-        {
-            return Err(anyhow!(
-                "cwd '{}' is not allowed by whitelist folders",
-                chosen_cwd.display()
-            ));
-        }
 
         let task_id = self.inner.next_task_id.fetch_add(1, Ordering::Relaxed);
         let event_emitter = EventEmitter::new(
@@ -103,13 +85,7 @@ impl TaskManager {
         runtime_cfg.backend = backend;
         runtime_cfg.codex_model = model;
 
-        let worker_tx = spawn_acp_worker(
-            runtime_cfg,
-            task_id,
-            chosen_cwd.clone(),
-            self.inner.access_control.clone(),
-            event_emitter,
-        )?;
+        let worker_tx = spawn_acp_worker(runtime_cfg, task_id, chosen_cwd.clone(), event_emitter)?;
 
         let snapshot = TaskSnapshot {
             task_id,
@@ -203,10 +179,6 @@ impl TaskManager {
             .map(|task| task.snapshot.clone())
     }
 
-    pub fn access_control(&self) -> AccessControl {
-        self.inner.access_control.clone()
-    }
-
     fn spawn_state_sync(&self) {
         let inner = self.inner.clone();
         tokio::spawn(async move {
@@ -246,9 +218,7 @@ pub fn resolve_cwd(input: Option<&str>) -> Option<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::WhitelistConfig;
     use crate::task_types::TaskEventKind;
-    use std::path::Path;
 
     #[test]
     fn resolve_cwd_uses_input_when_present() {
@@ -278,10 +248,7 @@ mod tests {
 
     #[tokio::test(flavor = "current_thread")]
     async fn create_task_requires_explicit_cwd() {
-        let access_control =
-            AccessControl::from_config(&WhitelistConfig::default(), Path::new("."))
-                .expect("access control");
-        let manager = TaskManager::new(AcpRuntimeConfig::default(), access_control, 1);
+        let manager = TaskManager::new(AcpRuntimeConfig::default(), 1);
 
         let err = manager
             .create_task(1001, 2001, None, AcpBackend::Codex, None)

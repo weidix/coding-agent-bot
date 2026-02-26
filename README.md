@@ -10,7 +10,7 @@ The bot supports:
 - Telegram interactions with inline buttons
 - Streaming-like task output by editing the same Telegram message
 - Multi-task concurrency (multiple Codex tasks at once)
-- Access control with user/chat whitelist and folder whitelist
+- Telegram sender allow-list (`telegram.allowed_users`)
 - Config-driven startup (no CLI arguments required)
 
 ## Requirements
@@ -22,7 +22,7 @@ The bot supports:
 
 ```bash
 cp config/bot.toml config/local.toml
-# edit config/local.toml with your Telegram token and whitelist
+# edit config/local.toml with your Telegram token and allowed_users
 CODING_AGENT_BOT_CONFIG=config/local.toml cargo run
 ```
 
@@ -46,11 +46,11 @@ Override with:
 Key sections:
 
 - `[telegram]` bot token and stream edit behavior
+- `[telegram]` includes `allowed_users`; an empty list means no one can send messages to the bot
 - `[acp]` runtime controls (`stream_chunk_delay_ms`, `io_channel_buffer_size`, `max_running_tasks`)
 - `[codex]` codex app-server settings (`binary_path`, `startup_timeout_ms`)
 - codex app-server is started on demand, with an automatically selected free local port; when connection is lost, the bot restarts the app-server and retries once
 - backend and model are selected during interaction (`/new <cwd> backend=codex [model=xxx]`)
-- `[whitelist]` user/chat allow-list and allowed folders
 
 ## Library Usage
 

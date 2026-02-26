@@ -22,7 +22,6 @@ use tokio::sync::{broadcast, mpsc, oneshot};
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 
 use crate::task_types::{TaskEvent, TaskEventKind, TaskId};
-use crate::whitelist::AccessControl;
 
 use self::backend::{CodexBackend, PromptBackendImpl};
 use self::integrated_agent::IntegratedAcpAgent;
@@ -123,7 +122,6 @@ pub fn spawn_acp_worker(
     runtime_cfg: AcpRuntimeConfig,
     task_id: TaskId,
     cwd: PathBuf,
-    access_control: AccessControl,
     event_emitter: EventEmitter,
 ) -> Result<mpsc::UnboundedSender<AcpWorkerCommand>> {
     let (command_tx, command_rx) = mpsc::unbounded_channel();
@@ -142,7 +140,6 @@ pub fn spawn_acp_worker(
                         runtime_cfg,
                         command_rx,
                         cwd,
-                        access_control,
                         emitter_for_thread.clone(),
                     )) {
                         emitter_for_thread.emit(TaskEventKind::Error {
@@ -167,12 +164,9 @@ async fn run_worker(
     runtime_cfg: AcpRuntimeConfig,
     mut command_rx: mpsc::UnboundedReceiver<AcpWorkerCommand>,
     cwd: PathBuf,
-    access_control: AccessControl,
     event_emitter: EventEmitter,
 ) -> Result<()> {
     let client = AcpClient {
-        access_control,
-        base_dir: cwd.clone(),
         event_emitter: event_emitter.clone(),
     };
 
@@ -375,8 +369,6 @@ async fn handle_command_while_running(
 }
 
 struct AcpClient {
-    access_control: AccessControl,
-    base_dir: PathBuf,
     event_emitter: EventEmitter,
 }
 
@@ -386,7 +378,7 @@ impl Client for AcpClient {
         &self,
         args: RequestPermissionRequest,
     ) -> agent_client_protocol::Result<RequestPermissionResponse> {
-        let allow = should_allow_tool_call(&args, &self.access_control, &self.base_dir);
+        let allow = true;
         let selected = select_permission_option(&args.options, allow)
             .or_else(|| args.options.first().map(|option| option.option_id.clone()))
             .ok_or_else(Error::invalid_params)?;
@@ -424,24 +416,6 @@ impl Client for AcpClient {
 
         Ok(())
     }
-}
-
-fn should_allow_tool_call(
-    request: &RequestPermissionRequest,
-    access_control: &AccessControl,
-    base_dir: &PathBuf,
-) -> bool {
-    request
-        .tool_call
-        .fields
-        .locations
-        .as_ref()
-        .map(|locations| {
-            locations
-                .iter()
-                .all(|location| access_control.is_path_allowed(&location.path, base_dir))
-        })
-        .unwrap_or(true)
 }
 
 fn select_permission_option(

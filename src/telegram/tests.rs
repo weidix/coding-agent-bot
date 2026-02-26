@@ -3,8 +3,8 @@ use std::path::PathBuf;
 use crate::acp::AcpBackend;
 
 use super::{
-    CALLBACK_STOP_PREFIX, parse_new_task_args, parse_prompt_command, parse_task_action,
-    render_stream_text,
+    CALLBACK_STOP_PREFIX, is_sender_allowed, parse_new_task_args, parse_prompt_command,
+    parse_task_action, render_stream_text,
 };
 
 #[test]
@@ -54,4 +54,19 @@ fn parse_new_task_args_accepts_path_without_model() {
 #[test]
 fn parse_new_task_args_rejects_unknown_backend() {
     assert!(parse_new_task_args("/new ./workspace backend=unknown").is_none());
+}
+
+#[test]
+fn sender_allow_list_semantics() {
+    assert!(!is_sender_allowed(Some("alice"), &[]));
+    assert!(is_sender_allowed(
+        Some("alice"),
+        &["alice".to_string(), "bob".to_string()]
+    ));
+    assert!(is_sender_allowed(
+        Some("ALICE"),
+        &["@alice".to_string(), "@bob".to_string()]
+    ));
+    assert!(!is_sender_allowed(Some("charlie"), &["alice".to_string()]));
+    assert!(!is_sender_allowed(None, &["alice".to_string()]));
 }

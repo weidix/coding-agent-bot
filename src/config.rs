@@ -15,8 +15,6 @@ pub struct AppConfig {
     pub acp: AcpConfig,
     #[serde(default)]
     pub codex: CodexConfig,
-    #[serde(default)]
-    pub whitelist: WhitelistConfig,
 }
 
 impl AppConfig {
@@ -29,7 +27,7 @@ impl AppConfig {
         let path_ref = path.as_ref();
         let raw = fs::read_to_string(path_ref)
             .with_context(|| format!("failed to read config file {}", path_ref.display()))?;
-        let mut cfg: Self = toml::from_str(&raw)
+        let cfg: Self = toml::from_str(&raw)
             .with_context(|| format!("failed to parse config file {}", path_ref.display()))?;
 
         if cfg.telegram.enabled && cfg.telegram.bot_token.trim().is_empty() {
@@ -53,13 +51,6 @@ impl AppConfig {
             ));
         }
 
-        cfg.whitelist.allowed_folders = cfg
-            .whitelist
-            .allowed_folders
-            .iter()
-            .map(PathBuf::from)
-            .collect();
-
         Ok(cfg)
     }
 }
@@ -74,6 +65,8 @@ pub struct TelegramConfig {
     pub stream_edit_interval_ms: u64,
     #[serde(default = "default_message_max_chars")]
     pub message_max_chars: usize,
+    #[serde(default)]
+    pub allowed_users: Vec<String>,
 }
 
 impl Default for TelegramConfig {
@@ -83,6 +76,7 @@ impl Default for TelegramConfig {
             bot_token: String::new(),
             stream_edit_interval_ms: default_stream_edit_interval_ms(),
             message_max_chars: default_message_max_chars(),
+            allowed_users: Vec::new(),
         }
     }
 }
@@ -122,18 +116,6 @@ impl Default for CodexConfig {
             startup_timeout_ms: default_codex_startup_timeout_ms(),
         }
     }
-}
-
-#[derive(Debug, Clone, Default, Deserialize)]
-pub struct WhitelistConfig {
-    #[serde(default)]
-    pub allowed_user_ids: Vec<i64>,
-    #[serde(default)]
-    pub allowed_chat_ids: Vec<i64>,
-    #[serde(default)]
-    pub allowed_folders: Vec<PathBuf>,
-    #[serde(default)]
-    pub allowed_folders_file: Option<PathBuf>,
 }
 
 const fn default_true() -> bool {
@@ -178,6 +160,7 @@ bot_token = "test-token"
 
         let cfg: AppConfig = toml::from_str(raw).expect("config should parse");
         assert_eq!(cfg.telegram.bot_token, "test-token");
+        assert!(cfg.telegram.allowed_users.is_empty());
         assert!(cfg.codex.binary_path.is_none());
         assert_eq!(cfg.codex.startup_timeout_ms, 5_000);
         assert_eq!(cfg.acp.stream_chunk_delay_ms, 25);
@@ -186,31 +169,16 @@ bot_token = "test-token"
     }
 
     #[test]
-    fn parse_whitelist_entries() {
+    fn parse_telegram_allowed_users() {
         let raw = r#"
 [telegram]
 enabled = true
 bot_token = "abc"
-
-[whitelist]
-allowed_user_ids = [1,2]
-allowed_chat_ids = [100]
-allowed_folders = ["./a", "./b"]
-allowed_folders_file = "./allow.txt"
+allowed_users = ["alice","@bob"]
 "#;
 
         let cfg: AppConfig = toml::from_str(raw).expect("config should parse");
-        assert_eq!(cfg.whitelist.allowed_user_ids, vec![1, 2]);
-        assert_eq!(cfg.whitelist.allowed_chat_ids, vec![100]);
-        assert_eq!(cfg.whitelist.allowed_folders.len(), 2);
-        assert_eq!(
-            cfg.whitelist
-                .allowed_folders_file
-                .as_ref()
-                .expect("file path")
-                .to_string_lossy(),
-            "./allow.txt"
-        );
+        assert_eq!(cfg.telegram.allowed_users, vec!["alice", "@bob"]);
     }
 
     #[test]
