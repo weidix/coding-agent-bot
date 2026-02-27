@@ -15,9 +15,11 @@ use crate::task_types::{TaskEvent, TaskEventKind, TaskId, TaskSnapshot};
 use access::{
     extract_callback_context, user_id_from_message, username_from_message, username_from_user,
 };
+use commands::register_bot_commands;
 use render::{format_task_summary, render_stream_text};
 
 mod access;
+mod commands;
 mod render;
 
 const CALLBACK_NEW_TASK: &str = "new_task";
@@ -49,6 +51,10 @@ struct StreamState {
 }
 
 pub async fn run_telegram(runtime: TelegramRuntime, bot: Bot) {
+    if let Err(err) = register_bot_commands(&bot).await {
+        tracing::warn!("failed to register telegram commands: {err}");
+    }
+
     let stream_renderer = Arc::new(Mutex::new(StreamRenderer::default()));
 
     spawn_stream_updates(
