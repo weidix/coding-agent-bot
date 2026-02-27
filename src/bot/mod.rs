@@ -1,6 +1,8 @@
 use agent_client_protocol as acp;
 use async_trait::async_trait;
 
+pub mod telegram;
+
 /// ACP-level abilities that a bot client may provide.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum BotAbility {
