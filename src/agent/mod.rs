@@ -1,6 +1,8 @@
 use agent_client_protocol as acp;
 use async_trait::async_trait;
 
+pub mod codex;
+
 /// Unified agent interface for ACP agent-side responsibilities.
 ///
 /// Method signatures intentionally reuse ACP schema types directly.
