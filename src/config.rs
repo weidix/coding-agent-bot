@@ -149,6 +149,30 @@ const fn default_message_max_chars() -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn write_temp_config(raw: &str) -> PathBuf {
+        let mut path = env::temp_dir();
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time should be after unix epoch")
+            .as_nanos();
+        path.push(format!(
+            "coding-agent-bot-config-test-{}-{}.toml",
+            std::process::id(),
+            unique
+        ));
+        fs::write(&path, raw).expect("temp config should be writable");
+        path
+    }
+
+    fn load_from_temp(raw: &str) -> Result<AppConfig> {
+        let path = write_temp_config(raw);
+        let result = AppConfig::load_from_path(&path);
+        let _ = fs::remove_file(path);
+        result
+    }
 
     #[test]
     fn parse_minimal_config() {
@@ -199,6 +223,65 @@ binary_path = "./tools/codex"
                 .as_ref()
                 .expect("codex binary path")
                 .ends_with("tools/codex")
+        );
+    }
+
+    #[test]
+    fn load_from_path_rejects_empty_token_when_telegram_enabled() {
+        let raw = r#"
+[telegram]
+enabled = true
+bot_token = ""
+"#;
+        let err = load_from_temp(raw).expect_err("config must fail");
+        assert!(
+            err.to_string()
+                .contains("telegram.bot_token must be set when telegram.enabled is true")
+        );
+    }
+
+    #[test]
+    fn load_from_path_rejects_invalid_numeric_fields() {
+        let acp_max_zero = r#"
+[telegram]
+enabled = true
+bot_token = "token"
+
+[acp]
+max_running_tasks = 0
+"#;
+        let err = load_from_temp(acp_max_zero).expect_err("config must fail");
+        assert!(
+            err.to_string()
+                .contains("acp.max_running_tasks must be greater than 0")
+        );
+
+        let acp_buffer_zero = r#"
+[telegram]
+enabled = true
+bot_token = "token"
+
+[acp]
+io_channel_buffer_size = 0
+"#;
+        let err = load_from_temp(acp_buffer_zero).expect_err("config must fail");
+        assert!(
+            err.to_string()
+                .contains("acp.io_channel_buffer_size must be greater than 0")
+        );
+
+        let codex_timeout_zero = r#"
+[telegram]
+enabled = true
+bot_token = "token"
+
+[codex]
+startup_timeout_ms = 0
+"#;
+        let err = load_from_temp(codex_timeout_zero).expect_err("config must fail");
+        assert!(
+            err.to_string()
+                .contains("codex.startup_timeout_ms must be greater than 0")
         );
     }
 }
